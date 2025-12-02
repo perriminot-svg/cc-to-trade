@@ -1,0 +1,51 @@
+from flask import Flask, request, jsonify
+from capitalcore_client import CapitalCoreClient
+
+app = Flask(__name__)
+client = CapitalCoreClient()
+
+# OPTIONAL: login here (or use persisted session)
+# client.login("<username>", "<password>")
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    """
+    Expected TradingView webhook JSON — adapt your TradingView alert message to include symbol/type/volume/sl/tp
+    Example TradingView alert message (JSON body):
+    {"symbol":"SILVER","type":"Buy","volume":0.01,"stop_loss":57.718,"take_profit":58.718}
+    """
+    try:
+        payload = request.get_json(force=True)
+    except Exception:
+        return jsonify({"error": "invalid json"}), 400
+
+    # basic validation
+    required = ["symbol", "type", "volume"]
+    if not all(k in payload for k in required):
+        return jsonify({"error": "missing fields", "required": required}), 400
+
+    # build base_payload for client.open_trade
+    base_payload = {
+        "symbol": payload["symbol"],
+        "type": payload["type"],
+        "volume": float(payload["volume"]),
+        "stop_loss": float(payload.get("stop_loss", 0)),
+        "take_profit": float(payload.get("take_profit", 0)),
+        "comment": payload.get("comment", f"Webhook {payload['type']} {payload['symbol']}"),
+    }
+
+    # extras: populate from your HAR / previous experiments
+    extras = {
+        # "leverage": 100,
+        # "order_type": "market",
+    }
+
+    try:
+        resp = client.open_trade(base_payload, extras=extras)
+    except Exception as e:
+        return jsonify({"status": "error", "detail": str(e)}), 500
+
+    return jsonify({"status": "ok", "response": resp}), 200
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
